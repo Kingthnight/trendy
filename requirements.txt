@@ -1,0 +1,2 @@
+# TrendY uses only the Python 3.9+ standard library.
+# This file is intentionally free of third-party packages.
