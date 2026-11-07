@@ -4,9 +4,10 @@ import argparse
 import sys
 from datetime import datetime
 
-from trendy.arxiv_client import ArxivError, fetch_signals
-from trendy.dates import TZ, fetch_window, parse_date, today
-from trendy.report import render, report_path
+from trendy.arxiv_client import ArxivError, fetch_signals as fetch_arxiv_signals
+from trendy.dates import TZ, daily_source_dates, fetch_window, parse_date, today
+from trendy.hf_client import HfError, fetch_signals as fetch_hf_signals
+from trendy.report import render_document, report_path
 from trendy.trends import compute
 
 
@@ -30,9 +31,19 @@ def main(argv: list[str] | None = None) -> int:
 
     window = fetch_window(as_of, now)
     try:
-        signals = [] if window is None else fetch_signals(*window)
-        text = render(compute(as_of, now, signals))
-    except ArxivError as exc:
+        hf_signals = fetch_hf_signals(daily_source_dates(as_of, now))
+        arxiv_signals = [] if window is None else fetch_arxiv_signals(*window)
+        text = render_document(
+            [
+                ("arXiv cs.LG", "cs.LG submission", compute(as_of, now, arxiv_signals)),
+                (
+                    "Hugging Face Daily Papers",
+                    "Hugging Face daily paper",
+                    compute(as_of, now, hf_signals),
+                ),
+            ]
+        )
+    except (ArxivError, HfError) as exc:
         print(str(exc), file=sys.stderr)
         return 1
 

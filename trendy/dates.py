@@ -57,6 +57,29 @@ def fetch_window(as_of: date, now: datetime) -> tuple[datetime, datetime] | None
     return start, end_exclusive
 
 
+def daily_source_dates(as_of: date, now: datetime) -> list[date]:
+    """One calendar day per request for a per-day source such as Hugging Face.
+
+    The set is the previous 7 days, the requested day, and the Monday–Sunday
+    week. Days after today are left out, so a week still in progress stops
+    at today. The extra days before Monday are what the day trend compares
+    against.
+    """
+    now = as_calcutta(now)
+    today = now.date()
+    week_start, week_end = week_bounds(as_of)
+    first = min(as_of - timedelta(days=RECENT_DAYS), week_start, as_of)
+    last = min(max(week_end, as_of), today)
+    if last < first:
+        return []
+    days: list[date] = []
+    day = first
+    while day <= last:
+        days.append(day)
+        day += timedelta(days=1)
+    return days
+
+
 def arxiv_bounds(start: datetime, end_exclusive: datetime) -> tuple[str, str]:
     """Inclusive UTC minute stamps for an arXiv submittedDate query."""
     start_utc = start.astimezone(timezone.utc).replace(second=0, microsecond=0)

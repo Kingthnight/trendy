@@ -17,7 +17,10 @@ from trendy.trends import (
 )
 
 ROOT = Path(__file__).resolve().parents[1]
-_PAPER_LINK = re.compile(r"arxiv\.org/(?:abs|pdf|html)/", re.IGNORECASE)
+_PAPER_LINK = re.compile(
+    r"arxiv\.org/(?:abs|pdf|html)/|huggingface\.co/papers/",
+    re.IGNORECASE,
+)
 _PAPER_ID = re.compile(r"\b\d{4}\.\d{4,5}(?:v\d+)?\b")
 
 
@@ -83,8 +86,8 @@ def _move_line(item: Move, *, fresh: bool) -> str:
     )
 
 
-def _list_section(title: str, items: tuple[Move, ...], empty: str, *, fresh: bool) -> list[str]:
-    lines = [f"### {title}", ""]
+def _list_section(heading: str, items: tuple[Move, ...], empty: str, *, fresh: bool) -> list[str]:
+    lines = [heading, ""]
     if not items:
         lines.append(empty)
     else:
@@ -116,7 +119,19 @@ def _week_table(top: tuple[TopicStats, ...]) -> list[str]:
     return lines
 
 
-def render(report: TrendReport) -> str:
+def _plural(record: str) -> str:
+    return record if record.endswith("s") else f"{record}s"
+
+
+def _trend_lines(
+    report: TrendReport,
+    *,
+    day_heading: str,
+    week_heading: str,
+    move_prefix: str,
+    record: str,
+) -> list[str]:
+    plural = _plural(record)
     rule = (
         f"Rises and fades are shifts of at least {MOVE_PP:.0f} percentage points versus "
         f"the previous {RECENT_DAYS} days, reported only when today has at least {MIN_DAY_PAPERS} papers "
@@ -130,18 +145,7 @@ def render(report: TrendReport) -> str:
     )
     average = report.recent_count / RECENT_DAYS
     lines = [
-        "# TrendY",
-        "",
-        "cs.LG topic trends from the live arXiv API. Aggregates only: no paper titles, abstracts, or ids.",
-        "",
-        f"- Run date: {_long_date(report.as_of)} (Asia/Calcutta)",
-        f"- Generated: {_stamp(report.generated_at)}",
-        f"- Week: Monday {_month_date(report.week_start)} – Sunday {_month_date(report.week_end)}",
-        "",
-        "A paper can match more than one theme, so shares overlap and do not sum to 100%. "
-        f"The day baseline is the pooled share across the previous {RECENT_DAYS} calendar days.",
-        "",
-        "## Day trend",
+        day_heading,
         "",
         (
             f"{_long_date(report.as_of)} against the previous {RECENT_DAYS} days "
@@ -172,12 +176,12 @@ def render(report: TrendReport) -> str:
                 newest = report.newest_submission
                 if newest is not None and newest.astimezone(TZ).date() < report.as_of:
                     lines.append(
-                        "No cs.LG submissions on this date are in the API. "
+                        f"No {plural} on this date are in the API. "
                         f"The newest one returned is {_stamp(newest)}, which is before this day, "
                         "so nothing rose, faded, or is new."
                     )
                 else:
-                    lines.append("No cs.LG papers on this date, so nothing rose, faded, or is new.")
+                    lines.append(f"No {plural} on this date, so nothing rose, faded, or is new.")
             else:
                 lines.append(
                     f"Not called. Today has {_num(report.today_count)} "
@@ -191,7 +195,7 @@ def render(report: TrendReport) -> str:
             if report.compare_enabled:
                 lines.extend(
                     _list_section(
-                        "Rose",
+                        f"{move_prefix} Rose",
                         report.rose,
                         f"No topic rose by {MOVE_PP:.0f} points or more.",
                         fresh=False,
@@ -199,7 +203,7 @@ def render(report: TrendReport) -> str:
                 )
                 lines.extend(
                     _list_section(
-                        "Faded",
+                        f"{move_prefix} Faded",
                         report.faded,
                         f"No topic faded by {MOVE_PP:.0f} points or more.",
                         fresh=False,
@@ -208,11 +212,11 @@ def render(report: TrendReport) -> str:
             else:
                 lines.extend(
                     [
-                        "### Rose",
+                        f"{move_prefix} Rose",
                         "",
                         f"Not called. The previous {RECENT_DAYS} days have only {_num(report.recent_count)} papers.",
                         "",
-                        "### Faded",
+                        f"{move_prefix} Faded",
                         "",
                         f"Not called. The previous {RECENT_DAYS} days have only {_num(report.recent_count)} papers.",
                         "",
@@ -221,14 +225,14 @@ def render(report: TrendReport) -> str:
             if report.new_enabled:
                 lines.extend(
                     _list_section(
-                        "New",
+                        f"{move_prefix} New",
                         report.new,
                         f"No topic was new relative to the previous {RECENT_DAYS} days.",
                         fresh=True,
                     )
                 )
 
-    lines.extend(["## Week trend", ""])
+    lines.extend([week_heading, ""])
     if report.week_in_progress:
         if report.newest_submission is None:
             lines.append(
@@ -237,7 +241,7 @@ def render(report: TrendReport) -> str:
         else:
             lines.append(
                 f"Requested through {_stamp(report.generated_at)}. "
-                f"The newest cs.LG submission the API returned is {_stamp(report.newest_submission)}. "
+                f"The newest {record} the API returned is {_stamp(report.newest_submission)}. "
                 "The week is still in progress."
             )
     else:
@@ -246,7 +250,7 @@ def render(report: TrendReport) -> str:
         )
     if report.week_count == 0:
         lines.append("")
-        lines.append("No cs.LG papers in this week window.")
+        lines.append(f"No {plural} in this week window.")
         lines.append("")
     else:
         lines.append(f"{_num(report.week_count)} papers.")
@@ -263,6 +267,65 @@ def render(report: TrendReport) -> str:
         )
         lines.append("")
 
+    return lines
+
+
+def _preamble(report: TrendReport, intro: str) -> list[str]:
+    return [
+        "# TrendY",
+        "",
+        intro,
+        "",
+        f"- Run date: {_long_date(report.as_of)} (Asia/Calcutta)",
+        f"- Generated: {_stamp(report.generated_at)}",
+        f"- Week: Monday {_month_date(report.week_start)} – Sunday {_month_date(report.week_end)}",
+        "",
+        "A paper can match more than one theme, so shares overlap and do not sum to 100%. "
+        f"The day baseline is the pooled share across the previous {RECENT_DAYS} calendar days.",
+        "",
+    ]
+
+
+def render(report: TrendReport) -> str:
+    lines = _preamble(
+        report,
+        "cs.LG topic trends from the live arXiv API. Aggregates only: no paper titles, abstracts, or ids.",
+    )
+    lines.extend(
+        _trend_lines(
+            report,
+            day_heading="## Day trend",
+            week_heading="## Week trend",
+            move_prefix="###",
+            record="cs.LG submission",
+        )
+    )
+    text = "\n".join(lines).rstrip() + "\n"
+    ensure_aggregate(text)
+    return text
+
+
+def render_document(sections: list[tuple[str, str, TrendReport]]) -> str:
+    """One report with a day trend and a week trend for each source."""
+    if not sections:
+        raise RuntimeError("Refusing to write an empty trend report")
+    lines = _preamble(
+        sections[0][2],
+        "Topic trends from the live arXiv API (cs.LG) and Hugging Face Daily Papers. "
+        "Aggregates only: no paper titles, abstracts, or ids.",
+    )
+    for title, record, report in sections:
+        lines.append(f"## {title}")
+        lines.append("")
+        lines.extend(
+            _trend_lines(
+                report,
+                day_heading="### Day trend",
+                week_heading="### Week trend",
+                move_prefix="####",
+                record=record,
+            )
+        )
     text = "\n".join(lines).rstrip() + "\n"
     ensure_aggregate(text)
     return text

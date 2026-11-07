@@ -4,9 +4,10 @@ from datetime import date, datetime, timedelta, timezone
 import unittest
 
 from trendy.arxiv_client import signals_from_feed
-from trendy.dates import TZ, arxiv_bounds, fetch_window, week_bounds
+from trendy.dates import TZ, arxiv_bounds, daily_source_dates, fetch_window, week_bounds
+from trendy.hf_client import next_page_url, signals_from_payload
 from trendy.models import PaperSignals
-from trendy.report import ensure_aggregate, render, report_path
+from trendy.report import ensure_aggregate, render, render_document, report_path
 from trendy.topics import match_topics
 from trendy.trends import compute
 
@@ -46,10 +47,66 @@ class DateTests(unittest.TestCase):
         self.assertEqual(start, datetime(2026, 10, 8, 0, 0, tzinfo=TZ))
         self.assertEqual(end, datetime(2026, 10, 19, 0, 0, tzinfo=TZ))
 
+    def test_daily_source_stops_at_today(self) -> None:
+        now = datetime(2026, 11, 7, 8, 49, tzinfo=TZ)
+        days = daily_source_dates(date(2026, 11, 7), now)
+        self.assertEqual(days[0], date(2026, 10, 31))
+        self.assertEqual(days[-1], date(2026, 11, 7))
+        self.assertNotIn(date(2026, 11, 8), days)
+
+    def test_future_daily_source_has_no_days(self) -> None:
+        now = datetime(2026, 11, 7, 8, 49, tzinfo=TZ)
+        self.assertEqual(daily_source_dates(date(2026, 11, 20), now), [])
+
     def test_arxiv_minutes_use_utc(self) -> None:
         start = datetime(2026, 11, 2, 0, 0, tzinfo=TZ)
         end = datetime(2026, 11, 7, 0, 40, tzinfo=TZ)
         self.assertEqual(arxiv_bounds(start, end), ("202611011830", "202611061909"))
+
+
+class HuggingFaceTests(unittest.TestCase):
+    def test_page_drops_text_and_duplicate_ids(self) -> None:
+        payload = """
+        [
+          {
+            "title": "Graph neural networks for weather",
+            "summary": "This note proposes a graph neural network.",
+            "paper": {
+              "id": "9999.00001",
+              "title": "Graph neural networks for weather",
+              "summary": "This note proposes a graph neural network.",
+              "submittedOnDailyAt": "2026-11-06T04:00:00Z"
+            }
+          },
+          {
+            "title": "Graph neural networks for weather again",
+            "paper": {
+              "id": "9999.00001",
+              "title": "duplicate listing",
+              "summary": "duplicate graph neural network",
+              "submittedOnDailyAt": "2026-11-06T05:00:00Z"
+            }
+          }
+        ]
+        """.encode()
+        signals = signals_from_payload(payload, date(2026, 11, 6))
+        self.assertEqual(len(signals), 1)
+        self.assertIn("Graph learning", signals[0].topics)
+        self.assertEqual(signals[0].submitted.astimezone(TZ).date(), date(2026, 11, 6))
+        blob = repr(signals[0])
+        self.assertNotIn("weather", blob.lower())
+        self.assertNotIn("proposes", blob.lower())
+        self.assertNotIn("9999.00001", blob)
+
+    def test_next_page_stays_on_the_api(self) -> None:
+        header = '<https://huggingface.co/api/daily_papers?date=2026-11-06&p=1>; rel="next"'
+        self.assertEqual(
+            next_page_url(header),
+            "https://huggingface.co/api/daily_papers?date=2026-11-06&p=1",
+        )
+        self.assertIsNone(
+            next_page_url('<https://example.com/api/daily_papers?p=1>; rel="next"')
+        )
 
 
 class TopicTests(unittest.TestCase):
@@ -204,6 +261,32 @@ class TrendTests(unittest.TestCase):
         self.assertIn("Healthcare and life sciences (1)", text)
         self.assertNotIn("arxiv.org", text.lower())
         ensure_aggregate(text)
+
+    def test_document_has_both_sources(self) -> None:
+        now = datetime(2026, 11, 7, 8, 49, tzinfo=TZ)
+        arxiv = compute(
+            date(2026, 11, 7),
+            now,
+            [paper(date(2026, 11, 6), 12, {"Large language models"})],
+        )
+        hf = compute(
+            date(2026, 11, 7),
+            now,
+            [paper(date(2026, 11, 5), 12, {"Agents"})],
+        )
+        text = render_document(
+            [
+                ("arXiv cs.LG", "cs.LG submission", arxiv),
+                ("Hugging Face Daily Papers", "Hugging Face daily paper", hf),
+            ]
+        )
+        self.assertIn("## arXiv cs.LG", text)
+        self.assertIn("## Hugging Face Daily Papers", text)
+        self.assertEqual(text.count("### Day trend"), 2)
+        self.assertEqual(text.count("### Week trend"), 2)
+        self.assertIn("Agents", text)
+        ensure_aggregate(text)
+        self.assertNotIn("huggingface.co/papers", text.lower())
 
     def test_report_path_names_the_date_and_week(self) -> None:
         path = report_path(date(2026, 11, 7))

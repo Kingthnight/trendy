@@ -1,13 +1,16 @@
 # TrendY
 
-Short trend reports for arXiv's Machine Learning section (`cs.LG`).
+Short trend reports for two public sources:
 
-Each run asks the [arXiv API](https://export.arxiv.org/api/help) what was submitted, scores a fixed list of AI/ML themes in memory, and writes one short report:
+- arXiv's Machine Learning section (`cs.LG`), from the [arXiv API](https://export.arxiv.org/api/help)
+- [Hugging Face Daily Papers](https://huggingface.co/papers), from `GET https://huggingface.co/api/daily_papers?date=YYYY-MM-DD`
 
-- **Day trend** for the chosen date (default: today in Asia/Calcutta). It compares that day's new `cs.LG` papers with the previous 7 calendar days and says what rose, what faded, and what is new.
+Each run scores a fixed list of AI/ML themes in memory and writes one short report. For each source the report has:
+
+- **Day trend** for the chosen date (default: today in Asia/Calcutta). It compares that day's papers with the previous 7 calendar days and says what rose, what faded, and what is new.
 - **Week trend** for the Monday–Sunday week that contains that date: the popular themes.
 
-The report is the only file written. Titles, abstracts, author names, and arXiv ids are not saved.
+The report is the only file written. Titles, abstracts, author names, and paper ids are not saved.
 
 ## Run
 
@@ -24,7 +27,9 @@ The command prints the report and saves it to:
 reports/<YYYY-MM-DD>_week-<monday>_to_<sunday>.md
 ```
 
-Running the same date again overwrites that file. A week of submissions takes a few minutes, because TrendY pages `export.arxiv.org` and waits 3 seconds between requests.
+Running the same date again overwrites that file. A run takes a few minutes, because TrendY pages `export.arxiv.org` and waits 3 seconds between those requests.
+
+Hugging Face is one request per Asia/Calcutta calendar day, for the previous 7 days and for the Monday–Sunday week, stopping at today when the week is still in progress. If that API links a next page, TrendY follows it. No API key is used.
 
 ## Dates
 
